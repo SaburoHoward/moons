@@ -22,6 +22,7 @@ class SatelliteModel:
         self.mass = np.zeros(nlayers)
         self.gravity = np.zeros(nlayers)
         self.pressure = np.zeros(nlayers)
+        self.rho = np.zeros(nlayers)
 
     def perso_density_profile(self):
         """
@@ -33,40 +34,31 @@ class SatelliteModel:
             rho = np.where(self.r <= layer["radius"], layer["density"], rho)
         return rho
         
-    def integrate_structure_iterate(self,max_iter):
+    def integrate_structure_iterate(self,max_iter,rtol,debug,P_surf):
         model = self.read_guess_model()
         self.r = np.array(model['R_CM'])[::-1]
         self.dr = self.diff_r()
-        #P = np.array(model['P_CGS'])[::-1]
-        P = np.ones_like(self.r) * 1e12
-        P_surf = 1e6
-        for i in range(max_iter):  # Fixed-point iteration
-            rho = self.polytrope(P)
-            shell_volumes = 4 * np.pi * self.r**2 * self.dr
-            shell_masses = shell_volumes * rho
-            mass = np.cumsum(shell_masses)
-            gravity = np.zeros_like(self.r)
-            gravity[1:] = G * mass[:-1] / self.r[1:]**2
-            dP = -rho * gravity * self.dr
-            P_new = np.zeros_like(P)
-            P_new[:-1] = np.cumsum(dP[::-1])[-2::-1]
-            P_new = P_new - P_new[0] + P_surf
-            #print(P_new)
+        #self.pressure = np.array(model['P_CGS'])[::-1]
+        self.pressure = np.ones_like(self.r) * 1e12
+        for iter in range(max_iter):
+            self.polytrope(self.pressure) #call the EOS to compute rho
+            self.mass_conservation()
+            self.hydrostatic_eq(P_surf)
+            if debug:
+                print(f"Iter {iter}, max(P): {P.max():.2e}, max(rho): {rho.max():.2e}")
             print("- - -")
-            if np.allclose(P, P_new, rtol=1e-4):
-                break
-            P = P_new
-            print(f"Iter {i}, max(P): {P.max():.2e}, max(rho): {rho.max():.2e}")
-        # Final assignment
-        self.pressure = P
-        self.rho = rho
-        self.mass = mass
-        self.gravity = gravity
         
     def mass_conservation(self):
         shell_volumes = 4 * np.pi * self.r**2 * self.dr
-        shell_masses = shell_volumes * rho
+        shell_masses = shell_volumes * self.rho
         self.mass = np.cumsum(shell_masses)
+        
+    def hydrostatic_eq(self,P_surf):
+        self.gravity[1:] = G * self.mass[:-1] / self.r[1:]**2
+        dP = -self.rho * self.gravity * self.dr
+        self.pressure[-1] = 0
+        self.pressure[:-1] = np.cumsum(dP[::-1])[-2::-1]
+        self.pressure = self.pressure - self.pressure[0] + P_surf
         
     def read_guess_model(self):
         model = ascii.read("JupiterModel/jup_howard23.csv",format="csv",guess=False,fast_reader={'exponent_style': 'D'})
@@ -80,8 +72,7 @@ class SatelliteModel:
     def polytrope(self, pressure):
         n = 1
         K = 1.96e11
-        rho = (pressure / K) ** (n / (n + 1))
-        return rho
+        self.rho = (pressure / K) ** (n / (n + 1))
 
     def plot(self):
         plt.figure(figsize=(14, 5))
