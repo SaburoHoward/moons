@@ -7,53 +7,65 @@ from astropy.io import ascii
 G = 6.67430e-8
 
 class SatelliteModel:
-    def __init__(self, name, radius, layers, nlayers):
+    def __init__(self, name, radius, layers, nlayers, distribution_type):
         self.name = name
         self.radius = radius
         self.layers = layers
         self.nlayers = nlayers
-        """
-        Next line will need work on the distribution of the layers.
-        """
-        #self.r = np.linspace(1, radius, nlayers)
-        #self.r = np.logspace(0, np.log10(radius), nlayers)
+        
+        # Call to select the radius mesh
+        self.radius_distrib(distribution_type)
         
         # Initialisations
         self.mass = np.zeros(nlayers)
         self.gravity = np.zeros(nlayers)
         self.pressure = np.zeros(nlayers)
         self.rho = np.zeros(nlayers)
-
-    def perso_density_profile(self):
-        """
-        Obsolete if we use an EOS.
-        This will need to be updated once we use EOSs to calculate density in each nlayer.
-        """
-        rho = np.zeros_like(self.r)
-        for layer in self.layers:
-            rho = np.where(self.r <= layer["radius"], layer["density"], rho)
-        return rho
         
     def integrate_structure_iterate(self,max_iter,rtol,debug,P_surf):
+        """
+        function which solves mass conservation and hydrostatic equilibrium, and iterates to converge to a solution.
+        """
         model = self.read_guess_model()
         self.r = np.array(model['R_CM'])[::-1]
         self.dr = self.diff_r()
         #self.pressure = np.array(model['P_CGS'])[::-1]
         self.pressure = np.ones_like(self.r) * 1e12
+        mtot_prev = None
+        
         for iter in range(max_iter):
             self.polytrope(self.pressure) #call the EOS to compute rho
             self.mass_conservation()
             self.hydrostatic_eq(P_surf)
+            
+            #Check convergence on total mass
+            try:
+                if mtot_prev is not None:
+                    relerr_mtot = (self.mass[-1] - mtot_prev) / mtot_prev
+                    if debug:
+                        print(f"Iter {iter}, relative error on M_tot: {relerr_mtot:.2e}")
+                    if abs(relerr_mtot) < rtol:
+                        print("Convergence on total mass reached.")
+                        break
+            except Exception as e:
+                print(f"Une erreur est survenue : {e}")
+            mtot_prev = self.mass[-1]
+            
             if debug:
                 print(f"Iter {iter}, max(P): {P.max():.2e}, max(rho): {rho.max():.2e}")
-            print("- - -")
         
     def mass_conservation(self):
+        """
+        dm/dr = 4 * pi * r^2 * rho
+        """
         shell_volumes = 4 * np.pi * self.r**2 * self.dr
         shell_masses = shell_volumes * self.rho
         self.mass = np.cumsum(shell_masses)
         
     def hydrostatic_eq(self,P_surf):
+        """
+        dP/dr = - rho * g
+        """
         self.gravity[1:] = G * self.mass[:-1] / self.r[1:]**2
         dP = -self.rho * self.gravity * self.dr
         self.pressure[-1] = 0
@@ -61,18 +73,59 @@ class SatelliteModel:
         self.pressure = self.pressure - self.pressure[0] + P_surf
         
     def read_guess_model(self):
+        """
+        to start from an existing model.
+        """
         model = ascii.read("JupiterModel/jup_howard23.csv",format="csv",guess=False,fast_reader={'exponent_style': 'D'})
         return model
         
     def diff_r(self):
+        """
+        calculates the radius difference between two layers of the model.
+        """
         dr = np.diff(self.r, prepend=self.r[0])
         #dr = np.diff(self.r)
         return dr
 
     def polytrope(self, pressure):
+        """
+        polytropic EOS, used to start easy, for Jupiter...
+        """
         n = 1
         K = 1.96e11
         self.rho = (pressure / K) ** (n / (n + 1))
+        
+    def radius_distrib(self,distribution_type):
+        """
+        defines the selected radii mesh
+        """
+        if distribution_type == "linear":
+            self.r = np.linspace(1, self.radius, self.nlayers)
+        elif distribution_type == "log":
+            self.r = np.logspace(0, np.log10(self.radius), self.nlayers)
+        elif distribution_type == "exp":
+            mesh_surf_amp = 1e5 #increase to have more layers near surface
+            mesh_surf_width = 5e-2 #controls the width of the refined region
+            f = np.linspace(0, 1, self.nlayers)
+            refinement = 1 + mesh_surf_amp * f * np.exp((f - 1) / mesh_surf_width) #densité de points dans l'espace normalisé.
+            r_norm = np.cumsum(1 / refinement) #1/refinement = espacement local entre 2 points. Cumsum pour cumul des espacements locaux.
+            r_norm -= r_norm[0] #to start at 0
+            r_norm /= r_norm[-1] #to get r[-1]=1
+            self.r = r_norm * self.radius
+        else:
+            self.r = np.linspace(1, self.radius, self.nlayers)
+            print('default is linear and is probably bad')
+        print(f"Radius mesh is : {distribution_type}")
+        #self.plot_radius_distrib(distribution_type)
+        
+    def perso_density_profile(self):
+        """
+        Obsolete if we use an EOS.
+        """
+        rho = np.zeros_like(self.r)
+        for layer in self.layers:
+            rho = np.where(self.r <= layer["radius"], layer["density"], rho)
+        return rho
 
     def plot(self):
         plt.figure(figsize=(14, 5))
@@ -92,3 +145,8 @@ class SatelliteModel:
         plt.tight_layout()
         plt.show()
 
+    def plot_radius_distrib(self,distribution_type):
+        plt.figure(figsize=(6,6))
+        plt.plot(np.linspace(1,self.nlayers,self.nlayers),self.r,label=distribution_type)
+        plt.legend()
+        plt.show()
