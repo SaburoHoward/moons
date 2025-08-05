@@ -16,9 +16,9 @@ layers_europe = [
 
 layers_jupiter = [
     {"name": "Envelope", "radius": 71492e5, "density": 0.01},
-    {"name": "Noyau", "radius": 714e5, "density": 10},
+    {"name": "Noyau", "radius": 10000e5, "density": 10},
 ]
 
-jupiter = SatelliteModel("jupiter", 71492e5, layers_jupiter, nlayers=100)
-jupiter.integrate_structure_iterate()
+jupiter = SatelliteModel("jupiter", 71492e5, layers_jupiter, nlayers=1014)
+jupiter.integrate_structure_iterate(max_iter=50)
 jupiter.plot()
