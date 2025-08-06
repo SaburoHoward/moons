@@ -118,6 +118,13 @@ class SatelliteModel:
         print(f"Radius mesh is : {distribution_type}")
         #self.plot_radius_distrib(distribution_type)
         
+    def moment_of_inertia(self):
+        """
+        for a sphere.
+        """
+        I = np.sum(4 * np.pi * self.r**4 * self.rho * self.dr)
+        return I
+        
     def perso_density_profile(self):
         """
         Obsolete if we use an EOS.
