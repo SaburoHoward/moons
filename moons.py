@@ -10,6 +10,13 @@ G = 6.67430e-8
 
 class SatelliteModel:
     def __init__(self, name, radius, layers, nlayers, distribution_type):
+        """
+        r : radii, from center to surface
+        m : masses, ---
+        pressure : pressures, from surface to center
+        temperature : temperatures, ---
+        rho : densities, ---
+        """
         self.name = name
         self.radius = radius
         self.layers = layers
@@ -37,7 +44,7 @@ class SatelliteModel:
         mtot_prev = None
         
         for iter in range(max_iter):
-            self.polytrope(self.pressure) #call the EOS to compute rho
+            self.get_density() #call the EOS to compute rho
             self.mass_conservation()
             self.hydrostatic_eq(P_surf)
             self.heat_transport(T_surf)
@@ -49,7 +56,7 @@ class SatelliteModel:
                     if debug:
                         print(f"Iter {iter}, relative error on M_tot: {relerr_mtot:.2e}")
                     if abs(relerr_mtot) < rtol:
-                        print("Convergence on total mass reached.")
+                        print(f"Convergence on total mass reached after {iter} iterations.")
                         break
             except Exception as e:
                 print(f"Une erreur est survenue : {e}")
@@ -73,7 +80,6 @@ class SatelliteModel:
         #self.gravity[1:] = G * self.mass[:-1] / self.r[1:]**2 #POURQUOI self.mass[:-1] ???
         self.gravity[1:] = G * self.mass[1:] / self.r[1:]**2
         dP = -self.rho * self.gravity * self.dr
-        print(self.mass)
         self.pressure[-1] = 0
         self.pressure[:-1] = np.cumsum(dP[::-1])[-2::-1]
         self.pressure = self.pressure - self.pressure[0] + P_surf
@@ -115,23 +121,38 @@ class SatelliteModel:
         """
         dr = np.diff(self.r, prepend=self.r[0])
         #dr = np.diff(self.r, prepend=self.r[0] - (self.r[1] - self.r[0]))
-        #dr = np.diff(self.r)
         return dr
-
-    def polytrope(self, pressure):
-        """
-        polytropic EOS, used to start easy, for Jupiter...
-        """
-        n = 1
-        K = 1.96e11
-        self.rho = (pressure / K) ** (n / (n + 1))
         
+    def get_density(self):
+        rho = np.zeros_like(self.pressure)
+        for i, layer in enumerate(self.layers):
+            n = layer["n"]
+            K = layer["K"]
+            r_max = layer["radius"]
+            if i == 0:
+                r_min = 0  # core
+            else:
+                r_min = self.layers[i - 1]["radius"]
+            # find indices between r_min and r_max
+            mask = (self.r  >= r_min) & (self.r  <= r_max)
+            indices = np.where(mask)[0]
+            j_indices = self.nlayers - indices - 1
+            P_sel = self.pressure[j_indices]
+            """
+            c'est ici qu'il faudra faire l'appel à l'eos pour avoir la densité
+            """
+            rho[j_indices] = self.polytrope(P_sel, n, K)
+        self.rho = rho
+
+    def polytrope(self, pressure, n, K):
+        return (pressure / K) ** (n / (n + 1))
+
     def radius_distrib(self,distribution_type):
         """
         defines the selected radii mesh
         """
         if distribution_type == "linear":
-            self.r = np.linspace(1, self.radius, self.nlayers)
+            self.r = np.linspace(0, self.radius, self.nlayers)
         elif distribution_type == "log":
             self.r = np.logspace(0, np.log10(self.radius), self.nlayers)
         elif distribution_type == "exp":

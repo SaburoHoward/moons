@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from moons import SatelliteModel
 
-#Merci de commencer par les couches les plus externes. Rayon en cm et densité en g/cc.
+#Merci de commencer par les couches les plus INTERNES. Rayon en cm et densité en g/cc.
 layers_europe = [
     {"name": "Glace", "radius": 1560e5, "density": 1},
     {"name": "Manteau", "radius": 1460e5, "density": 3},
@@ -15,8 +15,9 @@ layers_europe = [
 #europe.plot()
 
 layers_jupiter = [
-    {"name": "Envelope", "radius": 71492e5, "density": 0.01},
-    {"name": "Noyau", "radius": 10000e5, "density": 10},
+    {"name": "Noyau", "radius": 10000e5, "n": 1., "K": 1.96e11},
+    {"name": "Manteau", "radius": 51492e5, "n": 1, "K": 1.96e11},
+    {"name": "Envelope", "radius": 71492e5, "n": 1., "K": 1.96e11},
 ]
 
 jupiter = SatelliteModel("Jupiter", 71492e5, layers_jupiter, nlayers=1014, distribution_type='exp')
