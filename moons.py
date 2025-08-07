@@ -2,6 +2,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from astropy.table import Table
 from astropy.io import ascii
+from scipy.integrate import solve_ivp
+from scipy.interpolate import interp1d
 
 #Constants
 G = 6.67430e-8
@@ -20,16 +22,17 @@ class SatelliteModel:
         self.mass = np.zeros(nlayers)
         self.gravity = np.zeros(nlayers)
         self.pressure = np.zeros(nlayers)
+        self.temperature = np.zeros(nlayers)
         self.rho = np.zeros(nlayers)
         
-    def integrate_structure_iterate(self,max_iter,rtol,debug,P_surf):
+    def integrate_structure_iterate(self,max_iter,rtol,debug,P_surf,T_surf):
         """
         function which solves mass conservation and hydrostatic equilibrium, and iterates to converge to a solution.
         """
-        model = self.read_guess_model()
-        self.r = np.array(model['R_CM'])[::-1]
-        self.dr = self.diff_r()
+        #model = self.read_guess_model()
+        #self.r = np.array(model['R_CM'])[::-1]
         #self.pressure = np.array(model['P_CGS'])[::-1]
+        self.dr = self.diff_r()
         self.pressure = np.ones_like(self.r) * 1e12
         mtot_prev = None
         
@@ -37,6 +40,7 @@ class SatelliteModel:
             self.polytrope(self.pressure) #call the EOS to compute rho
             self.mass_conservation()
             self.hydrostatic_eq(P_surf)
+            self.heat_transport(T_surf)
             
             #Check convergence on total mass
             try:
@@ -66,11 +70,37 @@ class SatelliteModel:
         """
         dP/dr = - rho * g
         """
-        self.gravity[1:] = G * self.mass[:-1] / self.r[1:]**2
+        #self.gravity[1:] = G * self.mass[:-1] / self.r[1:]**2 #POURQUOI self.mass[:-1] ???
+        self.gravity[1:] = G * self.mass[1:] / self.r[1:]**2
         dP = -self.rho * self.gravity * self.dr
+        print(self.mass)
         self.pressure[-1] = 0
         self.pressure[:-1] = np.cumsum(dP[::-1])[-2::-1]
         self.pressure = self.pressure - self.pressure[0] + P_surf
+        
+    def heat_transport(self,T_surf):
+        """
+        dT/dP = T/P * nabla_T
+        """
+        grada = self.nabla_T()
+        grada = grada[:]
+        interp_nabla = interp1d(self.pressure[:],grada, bounds_error=False, fill_value=0.3)
+        def dT_dP(p,t):
+            #return t / p * interp_nabla(p)
+            return t / p * 0.3
+        P_eval = self.pressure[:]
+        sol = solve_ivp(dT_dP,(P_eval[0],P_eval[-1]),np.array([T_surf]),t_eval=P_eval)
+        assert sol.success, "Temperature integration failed..."
+        T_out = sol.y[0]
+        self.temperature = T_out
+        #print(self.temperature)
+        
+    def nabla_T(self):
+        """
+        calculation of nabla_T for heat transport equation.
+        """
+        grada = np.ones_like(self.pressure) * 0.3
+        return grada
         
     def read_guess_model(self):
         """
@@ -84,6 +114,7 @@ class SatelliteModel:
         calculates the radius difference between two layers of the model.
         """
         dr = np.diff(self.r, prepend=self.r[0])
+        #dr = np.diff(self.r, prepend=self.r[0] - (self.r[1] - self.r[0]))
         #dr = np.diff(self.r)
         return dr
 
@@ -141,9 +172,9 @@ class SatelliteModel:
         plt.title("Density (g/cc)")
         plt.xlabel("Radius (km)")
         plt.subplot(1, 3, 2)
-        plt.plot(self.r / 1e5, self.pressure/1e9)
-        plt.title("Pressure (kbar)")
-        plt.xlabel("Radius (km)")
+        plt.plot(self.pressure/1e6,self.temperature)
+        plt.title("Temperature (K)")
+        plt.xlabel("Pressure (bar)")
         plt.subplot(1, 3, 3)
         plt.plot(self.r / 1e5, self.mass / 1e24)
         plt.title("Cumulated mass ($10^{24}$ g)")
@@ -153,7 +184,7 @@ class SatelliteModel:
         plt.show()
 
     def plot_radius_distrib(self,distribution_type):
-        plt.figure(figsize=(6,6))
-        plt.plot(np.linspace(1,self.nlayers,self.nlayers),self.r,label=distribution_type)
+        plt.figure(figsize=(10,10))
+        plt.scatter(np.linspace(1,self.nlayers,self.nlayers),self.r,label=distribution_type,s=1)
         plt.legend()
         plt.show()

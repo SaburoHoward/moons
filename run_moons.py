@@ -20,7 +20,7 @@ layers_jupiter = [
 ]
 
 jupiter = SatelliteModel("Jupiter", 71492e5, layers_jupiter, nlayers=1014, distribution_type='exp')
-jupiter.integrate_structure_iterate(max_iter=40,rtol=1e-4,debug=False,P_surf=1e6)
-MoI = jupiter.moment_of_inertia()
-print(MoI/(1.898e30*(71492e5)**2))
-#jupiter.plot()
+jupiter.integrate_structure_iterate(max_iter=40,rtol=1e-4,debug=False,P_surf=1e6,T_surf=165.)
+#MoI = jupiter.moment_of_inertia()
+#print(MoI/(1.898e30*(71492e5)**2))
+jupiter.plot()
