@@ -1,27 +1,32 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from moons import SatelliteModel
+import time
 
 #Merci de commencer par les couches les plus INTERNES. Rayon en cm et densité en g/cc.
-layers_europe = [
-    {"name": "Glace", "radius": 1560e5, "density": 1},
-    {"name": "Manteau", "radius": 1460e5, "density": 3},
-    {"name": "Noyau", "radius": 400e5, "density": 5},
+#Veillez à ce que la masse de la dernière couche soit similaire à la masse totale de la planète...
+
+#Jupiter w/ a polytrope
+layers_jupiter = [
+    {"name": "Noyau", "mass": 1.898e28, "eos": "polytrope", "n": 1., "K": 2.003565e12},
+    {"name": "Manteau", "mass": 1.898e29, "eos": "polytrope", "n": 1, "K": 2.003565e12},
+    {"name": "Envelope", "mass": 1.8982532e30, "eos": "polytrope", "n": 1., "K": 2.003565e12},
 ]
 
-#europe = SatelliteModel("Europa", 1560e5, layers_europe, nlayers=100)
-#europe.integrate_structure()
-#europe.integrate_structure_iterate()
-#europe.plot()
+#Jupiter as a pure H-He ball (CMS19 EOS)
 
 layers_jupiter = [
-    {"name": "Noyau", "radius": 10000e5, "n": 1., "K": 1.96e11},
-    {"name": "Manteau", "radius": 51492e5, "n": 1, "K": 1.96e11},
-    {"name": "Envelope", "radius": 71492e5, "n": 1., "K": 1.96e11},
+    {"name": "Noyau", "mass": 1.898e28, "eos": "mixture","nbelem":2,"files":["Chabrier2019-H.csv","Chabrier2019-He.csv"],"mass_fractions":[0.73,0.27]},
+    {"name": "Manteau", "mass": 1.898e29, "eos": "mixture","nbelem":2,"files":["Chabrier2019-H.csv","Chabrier2019-He.csv"],"mass_fractions":[0.73,0.27]},
+    {"name": "Envelope", "mass": 1.8982532e30, "eos": "mixture","nbelem":2,"files":["Chabrier2019-H.csv","Chabrier2019-He.csv"],"mass_fractions":[0.73,0.27]},
 ]
 
-jupiter = SatelliteModel("Jupiter", 71492e5, layers_jupiter, nlayers=1014, distribution_type='exp')
-jupiter.integrate_structure_iterate(max_iter=40,rtol=1e-4,debug=False,P_surf=1e6,T_surf=165.)
+
+t0 = time.time()
+jupiter = SatelliteModel("Jupiter", 1.8982532e30, layers_jupiter, nlayers=1000, distribution_type='exp')
+jupiter.integrate_structure_iterate(max_iter=50,rtol=1e-4,debug=False,P_surf=1e6,T_surf=165.)
 #MoI = jupiter.moment_of_inertia()
 #print(MoI/(1.898e30*(71492e5)**2))
+t1 = time.time()
+print("Temps écoulé :", t1 - t0, "s")
 jupiter.plot()
