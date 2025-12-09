@@ -5,7 +5,7 @@ from astropy.io import ascii
 from scipy.integrate import solve_ivp
 from scipy.interpolate import interp1d
 
-from eos.polytrope import polytrope
+from eos.analytical_eos import polytrope, hm1989_rocks_vec
 from eos.mixture import linear_mixing, pure_eos
 
 #Constants
@@ -90,6 +90,8 @@ class SatelliteModel:
         """dT/dP = T/P * nabla_T"""
         gradt = self.gradad
         #gradt = self.nabla_T()
+        mask = (gradt == 0.)
+        isoT_indices = np.where(mask)[0] #I check where gradt=0 and save the indices to further set the temperature
         interp_nabla = interp1d(self.p,gradt)
         def dT_dP(p,t):
             return t / p * interp_nabla(p)
@@ -98,6 +100,7 @@ class SatelliteModel:
         assert sol.success, "Temperature integration failed..."
         T_out = sol.y[0][::-1]
         self.t = T_out
+        self.t[isoT_indices]=np.max(T_out)
         
     def nabla_T(self):
         """calculation of nabla_T for heat transport equation."""
@@ -124,6 +127,8 @@ class SatelliteModel:
                         interp_rho,interp_s = pure_eos(layer["files"][j],"cubic")
                         layer_svpk.append([interp_rho,interp_s])
                     self.svpk.append(layer_svpk)
+                else:
+                    self.svpk.append(["None","None"]) #to avoid indices problemes when using different layer["eos"] in one structure.
         
         rho = np.zeros_like(self.p)
         gradad = np.zeros_like(self.p)
@@ -144,8 +149,12 @@ class SatelliteModel:
                 n = layer["n"]
                 K = layer["K"]
                 rho[indices] = polytrope(P_sel, n, K)
+            if layer["eos"]=="hm1989_rocks":
+                rho[indices] = hm1989_rocks_vec(P_sel, layer["roches"])
             if layer["eos"]=="mixture":
                 rho[indices],s[indices],gradad[indices] = linear_mixing(np.log10(P_sel),np.log10(T_sel),layer["nbelem"],layer["mass_fractions"],self.svpk[i])
+                if layer["T_struct"]=="isotherm":
+                    gradad[indices]=0.
         self.rho = rho
         self.s = s
         self.gradad = gradad
@@ -188,7 +197,8 @@ class SatelliteModel:
     def read_guess_model(self):
         """to start from an existing model."""
         #model = ascii.read("JupiterModel/jup_howard23.csv",format="csv",guess=False,fast_reader={'exponent_style': 'D'})
-        model = ascii.read("JupiterModel/Jupiter_Z0/jup.csv",format="csv",guess=False,fast_reader={'exponent_style': 'D'})
+        #model = ascii.read("JupiterModel/Jupiter_Z0/jup_pureH-He.csv",format="csv",guess=False,fast_reader={'exponent_style': 'D'})
+        #model = ascii.read("JupiterModel/Jupiter_Z0/jup_RockyCore1percent.csv",format="csv",guess=False,fast_reader={'exponent_style': 'D'})
         #model = ascii.read("JupiterModel/Polytrope/jup.csv",format="csv",guess=False,fast_reader={'exponent_style': 'D'})
         return model
         
