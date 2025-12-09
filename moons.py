@@ -115,8 +115,9 @@ class SatelliteModel:
         
     def get_density(self,iter):
         """
-        ici on fait l'initialisation et on récupère interp_rho et interp_s pour chaque EOS de chaque couche.
-        On stocke ça dans svpk. svpk=[(interp_rho_elem0_layer0,interp_S_elem0_layer0),(interp_rho_elem1_layer0,interp_S_elem1_layer0),...]
+        This returns not only density, but also entropy and adiabatic gradient.
+        I first initialise to get interp_rho et interp_s for each tabulated eos in the different layers.
+        This is saved in svpk. svpk=[(interp_rho_elem0_layer0,interp_S_elem0_layer0),(interp_rho_elem1_layer0,interp_S_elem1_layer0),...]
         """
         if iter==0:
             for i, layer in enumerate(self.layers):
@@ -151,6 +152,8 @@ class SatelliteModel:
                 rho[indices] = polytrope(P_sel, n, K)
             if layer["eos"]=="hm1989_rocks":
                 rho[indices] = hm1989_rocks_vec(P_sel, layer["roches"])
+            if layer["eos"]=="constant_density":
+                rho[indices] = layer["constant_rho"]
             if layer["eos"]=="mixture":
                 rho[indices],s[indices],gradad[indices] = linear_mixing(np.log10(P_sel),np.log10(T_sel),layer["nbelem"],layer["mass_fractions"],self.svpk[i])
                 if layer["T_struct"]=="isotherm":
@@ -187,18 +190,11 @@ class SatelliteModel:
         I = np.sum(4 * np.pi * self.r**4 * self.rho * self.dr)
         return I
         
-    def perso_density_profile(self):
-        """Obsolete if we use an EOS."""
-        rho = np.zeros_like(self.m)
-        for layer in self.layers:
-            rho = np.where(self.m <= layer["mass"], layer["density"], rho)
-        return rho
-        
     def read_guess_model(self):
-        """to start from an existing model."""
+        """to start from/or compare to an existing model."""
         #model = ascii.read("JupiterModel/jup_howard23.csv",format="csv",guess=False,fast_reader={'exponent_style': 'D'})
         #model = ascii.read("JupiterModel/Jupiter_Z0/jup_pureH-He.csv",format="csv",guess=False,fast_reader={'exponent_style': 'D'})
-        #model = ascii.read("JupiterModel/Jupiter_Z0/jup_RockyCore1percent.csv",format="csv",guess=False,fast_reader={'exponent_style': 'D'})
+        model = ascii.read("JupiterModel/Jupiter_Z0/jup_RockyCore1percent.csv",format="csv",guess=False,fast_reader={'exponent_style': 'D'})
         #model = ascii.read("JupiterModel/Polytrope/jup.csv",format="csv",guess=False,fast_reader={'exponent_style': 'D'})
         return model
         

@@ -1,11 +1,14 @@
 import numpy as np
 
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 def polytrope(pressure, n, K):
     """
     Polytrope used to reproduce Jupiter
     """
     return (pressure / K) ** (n / (n + 1))
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 def hm1989_rocks(pressure,roches):
     """
     Analytical formula from Hubbard & Marley 1989.
@@ -51,3 +54,8 @@ def pro_ice(rho):
     
 def dpro_ice(rho):
     return (3.71926/rho-0.271321+0.00700925*2*rho)*(rho**3.71926)*np.exp(-2.75591-0.271321*rho+0.00700925*rho*rho)
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
