@@ -51,7 +51,7 @@ class SatelliteModel:
         rtot_prev = None
         
         for iter in range(max_iter):
-            print(f"- - - Iteration {iter} - - -")
+            #print(f"- - - Iteration {iter} - - -")
             self.get_density(iter) #call the EOS to compute rho
             self.mass_conservation()
             self.hydrostatic_eq(P_surf)
@@ -63,7 +63,7 @@ class SatelliteModel:
                     if debug:
                         print(f"Iter {iter}, relative error on R_tot: {relerr_rtot:.2e}")
                     if abs(relerr_rtot) < rtol and iter >= min_iterations:
-                        print(f"Convergence on total radius reached after {iter} iterations.")
+                        #print(f"Convergence on total radius reached after {iter} iterations.")
                         break
             except Exception as e:
                 print(f"Une erreur est survenue : {e}")
@@ -180,15 +180,16 @@ class SatelliteModel:
         else:
             self.m = np.linspace(1, self.mass, self.nlayers)
             print('default is linear and is probably bad')
-        print(f"Mass mesh is : {distribution_type}")
+        #print(f"Mass mesh is : {distribution_type}")
         #self.plot_mass_distrib(distribution_type)
         
     def moment_of_inertia(self):
         """
         for a sphere.
         """
-        I = np.sum(4 * np.pi * self.r**4 * self.rho * self.dr)
-        return I
+        R_cm = self.r[-1]
+        I = np.trapz((8/3)*np.pi * self.r**4 * self.rho, x=self.r)
+        return R_cm,I
         
     def read_guess_model(self):
         """to start from/or compare to an existing model."""
