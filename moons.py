@@ -4,6 +4,7 @@ from astropy.table import Table
 from astropy.io import ascii
 from scipy.integrate import solve_ivp
 from scipy.interpolate import interp1d
+from scipy.special import erf
 
 from eos.analytical_eos import polytrope, hm1989_rocks_vec
 from eos.mixture import linear_mixing, pure_eos
@@ -39,15 +40,21 @@ class SatelliteModel:
         self.gradad = np.zeros(nlayers)
         self.svpk = [] #to stock the interpolation functions from EOSs. Name comes from CEPAM.
         
-    def integrate_structure_iterate(self,max_iter,rtol,debug,P_surf,T_surf,min_iterations=10):
+    def integrate_structure_iterate(self,max_iter,rtol,debug,P_surf,T_surf,from_scratch,min_iterations=10):
         """function which solves mass conservation and hydrostatic equilibrium, and iterates to converge to a solution."""
         #model = self.read_guess_model()
+        #self.m = model["# M_MTOT"].data[::-1]*self.mass
         #self.temperature = np.array(model['T_K'])
+        #print(self.m)
         self.dm = self.diff_m()
-        
-        self.p = np.ones_like(self.m) * 1e12
+        if from_scratch:
+            self.p = np.ones_like(self.m) * 1e12
+        else:
+            # To converge faster, we start directly from a previously calculated polytrope.
+            polytrope = self.start_from_poly()
+            self.p = polytrope['P_CGS'].data[::-1]
+    
         self.t = np.ones_like(self.m) * 1e4
-        
         rtot_prev = None
         
         for iter in range(max_iter):
@@ -63,7 +70,7 @@ class SatelliteModel:
                     if debug:
                         print(f"Iter {iter}, relative error on R_tot: {relerr_rtot:.2e}")
                     if abs(relerr_rtot) < rtol and iter >= min_iterations:
-                        #print(f"Convergence on total radius reached after {iter} iterations.")
+                        print(f"Convergence on total radius reached after {iter} iterations.")
                         break
             except Exception as e:
                 print(f"Une erreur est survenue : {e}")
@@ -92,14 +99,22 @@ class SatelliteModel:
         #gradt = self.nabla_T()
         mask = (gradt == 0.)
         isoT_indices = np.where(mask)[0] #I check where gradt=0 and save the indices to further set the temperature
-        interp_nabla = interp1d(self.p,gradt)
+        if isoT_indices.size == 0:
+            interp_nabla = interp1d(self.p,gradt)
+        else:
+            interp_nabla = interp1d(self.p[isoT_indices[-1]+1:],gradt[isoT_indices[-1]+1:])
         def dT_dP(p,t):
             return t / p * interp_nabla(p)
         P_eval = self.p[:][::-1]
+        if isoT_indices.size != 0:
+            P_eval = P_eval[:self.nlayers-isoT_indices[-1]-1]
         sol = solve_ivp(dT_dP,(P_eval[0],P_eval[-1]),np.array([T_surf]),t_eval=P_eval)
         assert sol.success, "Temperature integration failed..."
         T_out = sol.y[0][::-1]
-        self.t = T_out
+        if isoT_indices.size == 0:
+            self.t = T_out
+        else:
+            self.t[isoT_indices[-1]+1:] = T_out
         self.t[isoT_indices]=np.max(T_out)
         
     def nabla_T(self):
@@ -177,11 +192,22 @@ class SatelliteModel:
             m_norm -= m_norm[0] #to start at 0
             m_norm /= m_norm[-1] #to get r[-1]=1
             self.m = m_norm * self.mass
+        elif distribution_type == "debras":
+            beta = 6.0 / self.nlayers
+            i = np.arange(self.nlayers)
+            lambdas = 1.0 - (np.exp(i * beta) - 1.0) / (np.exp(self.nlayers * beta) - 1.0)
+            self.m = lambdas[::-1] * self.mass
+        elif distribution_type == "erf":
+            p1 = 2.7
+            p2 = 0.6
+            xi = np.linspace(-p1 + p2, p1 + p2, self.nlayers)
+            mesh = 0.5 * (1 + erf(xi))
+            mesh = (mesh - mesh[0]) / (mesh[-1] - mesh[0])
+            self.m = mesh * self.mass
         else:
             self.m = np.linspace(1, self.mass, self.nlayers)
             print('default is linear and is probably bad')
         #print(f"Mass mesh is : {distribution_type}")
-        #self.plot_mass_distrib(distribution_type)
         
     def moment_of_inertia(self):
         """
@@ -193,11 +219,16 @@ class SatelliteModel:
         
     def read_guess_model(self):
         """to start from/or compare to an existing model."""
+        #model = ascii.read("JupiterModel/Polytrope/jup_1000.csv",format="csv",guess=False,fast_reader={'exponent_style': 'D'})
         #model = ascii.read("JupiterModel/jup_howard23.csv",format="csv",guess=False,fast_reader={'exponent_style': 'D'})
         #model = ascii.read("JupiterModel/Jupiter_Z0/jup_pureH-He.csv",format="csv",guess=False,fast_reader={'exponent_style': 'D'})
-        model = ascii.read("JupiterModel/Jupiter_Z0/jup_RockyCore1percent.csv",format="csv",guess=False,fast_reader={'exponent_style': 'D'})
-        #model = ascii.read("JupiterModel/Polytrope/jup.csv",format="csv",guess=False,fast_reader={'exponent_style': 'D'})
+        #model = ascii.read("JupiterModel/Jupiter_Z0/jup_RockyCore1percent.csv",format="csv",guess=False,fast_reader={'exponent_style': 'D'})
+        model = ascii.read("JupiterModel/Jupiter_Z0/jup_RockyCore10percent.csv",format="csv",guess=False,fast_reader={'exponent_style': 'D'})
         return model
+        
+    def start_from_poly(self):
+        poly = Table.read("polytrope_moons.csv",format='csv')
+        return poly
         
     def save_output(self):
         output = Table([(self.r / self.r[-1])[::-1],(self.m / self.m[-1])[::-1],self.r[::-1],self.m[::-1],
@@ -215,22 +246,19 @@ class SatelliteModel:
         plt.title("Density (g/cc)")
         plt.xlabel("Radius (km) (depth)")
         plt.subplot(1, 3, 2)
-        plt.plot(self.p/1e6,self.t)
+        plt.plot(self.p/1e6,self.t,lw=1)
         plt.plot(jup_ref['P_CGS']/1e6,jup_ref['T_K'])
         plt.title("Temperature (K)")
         plt.xlabel("Pressure (bar)")
+        #plt.xscale('log')
         plt.subplot(1, 3, 3)
-        plt.plot(self.r / 1e5, self.m / 1e24)
-        plt.plot(jup_ref['R_CM']/1e5,jup_ref['# M_MTOT']*1.89861120e+6)
-        plt.title("Cumulated mass ($10^{24}$ g)")
-        plt.xlabel("Radius (km)")
+        #plt.plot(self.r / 1e5, self.m / 1e24)
+        #plt.plot(jup_ref['R_CM']/1e5,jup_ref['# M_MTOT']*1.89861120e+6)
+        #plt.title("Cumulated mass ($10^{24}$ g)")
+        #plt.xlabel("Radius (km)")
+        plt.scatter(self.r/self.r[-1],self.m/self.m[-1],s=2)
+        plt.scatter(jup_ref['R_RTOT'],jup_ref['# M_MTOT'],s=1,alpha=0.2)
         plt.suptitle(f"Internal structure of {self.name}")
         plt.tight_layout()
         plt.show()
         #fig.savefig("Figures/CMS19_comparison.pdf",bbox_inches="tight")
-
-    def plot_mass_distrib(self,distribution_type):
-        plt.figure(figsize=(10,10))
-        plt.scatter(np.linspace(1,self.nlayers,self.nlayers),self.m,label=distribution_type,s=1)
-        plt.legend()
-        plt.show()
