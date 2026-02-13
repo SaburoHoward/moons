@@ -9,11 +9,14 @@ from scipy.special import erf
 from eos.analytical_eos import polytrope, hm1989_rocks_vec
 from eos.mixture import linear_mixing, pure_eos
 
+from gravity.gravitational_harmonics import Pn, C
+from gravity.clairaut import solve_clairaut
+
 #Constants
-G = 6.67430e-8
+G = 6.673848e-8
 
 class SatelliteModel:
-    def __init__(self, name, mass, layers, nlayers, distribution_type):
+    def __init__(self, name, mass, Prot, layers, nlayers, distribution_type):
         """
         r : radii, from center to surface
         m : masses, ---
@@ -23,6 +26,7 @@ class SatelliteModel:
         """
         self.name = name
         self.mass = mass
+        self.Prot = Prot
         self.layers = layers
         self.nlayers = nlayers
         
@@ -40,7 +44,7 @@ class SatelliteModel:
         self.gradad = np.zeros(nlayers)
         self.svpk = [] #to stock the interpolation functions from EOSs. Name comes from CEPAM.
         
-    def integrate_structure_iterate(self,max_iter,rtol,debug,P_surf,T_surf,from_scratch,min_iterations=10):
+    def integrate_structure_iterate(self,max_iter,rtol,debug,P_surf,T_surf,from_scratch,save,min_iterations=10):
         """function which solves mass conservation and hydrostatic equilibrium, and iterates to converge to a solution."""
         #model = self.read_guess_model()
         #self.m = model["# M_MTOT"].data[::-1]*self.mass
@@ -62,7 +66,7 @@ class SatelliteModel:
             self.get_density(iter) #call the EOS to compute rho
             self.mass_conservation()
             self.hydrostatic_eq(P_surf)
-            self.heat_transport(T_surf)
+            #self.heat_transport(T_surf)
             
             try:
                 if rtot_prev is not None:
@@ -78,7 +82,8 @@ class SatelliteModel:
             
             if debug:
                 print(f"Iter {iter}, max(P): {P.max():.2e}, max(rho): {rho.max():.2e}")
-        self.save_output()
+        if save:
+            self.save_output()
         
     def mass_conservation(self):
         """dm/dr = 4 * pi * r^2 * rho"""
@@ -100,9 +105,9 @@ class SatelliteModel:
         mask = (gradt == 0.)
         isoT_indices = np.where(mask)[0] #I check where gradt=0 and save the indices to further set the temperature
         if isoT_indices.size == 0:
-            interp_nabla = interp1d(self.p,gradt)
+            interp_nabla = interp1d(self.p,gradt,bounds_error=False,fill_value="extrapolate")
         else:
-            interp_nabla = interp1d(self.p[isoT_indices[-1]+1:],gradt[isoT_indices[-1]+1:])
+            interp_nabla = interp1d(self.p[isoT_indices[-1]+1:],gradt[isoT_indices[-1]+1:],bounds_error=False,fill_value="extrapolate")
         def dT_dP(p,t):
             return t / p * interp_nabla(p)
         P_eval = self.p[:][::-1]
@@ -217,6 +222,17 @@ class SatelliteModel:
         I = np.trapz((8/3)*np.pi * self.r**4 * self.rho, x=self.r)
         return R_cm,I
         
+    def get_gravity(self):
+        J = C(2,0,self.mass,self.r,self.rho)
+        return J
+        
+    def call_clairaut(self):
+        omega = 2*np.pi/self.Prot/24/3600
+        q_r = omega**2*self.r[-1]**3/G/self.mass
+        r_sol, alpha_sol = solve_clairaut(self.r/self.r[-1], self.rho, q_r)
+        J2 = (alpha_sol[-1]-(5/4)*q_r)*2/3
+        return J2
+        
     def read_guess_model(self):
         """to start from/or compare to an existing model."""
         #model = ascii.read("JupiterModel/Polytrope/jup_1000.csv",format="csv",guess=False,fast_reader={'exponent_style': 'D'})
@@ -227,27 +243,27 @@ class SatelliteModel:
         return model
         
     def start_from_poly(self):
-        poly = Table.read("polytrope_moons.csv",format='csv')
+        poly = Table.read("model_ini/polytrope_jup_1000.csv",format='csv')
         return poly
         
     def save_output(self):
         output = Table([(self.r / self.r[-1])[::-1],(self.m / self.m[-1])[::-1],self.r[::-1],self.m[::-1],
                         self.p[::-1],self.t[::-1],self.rho[::-1],self.s[::-1],self.gradad[::-1]],
                 names=('R_RTOT','M_MTOT','R_CM','M_G','P_CGS','T_K','RHO_GCC','S_CGS','GRADAD'))
-        output.write("model.csv",overwrite=True)
+        output.write("output/model.csv",overwrite=True)
 
     def plot(self):
         jup_ref = self.read_guess_model()
         fig = plt.figure(figsize=(14, 5))
         plt.subplot(1, 3, 1)
         plt.plot(self.r / 1e5, self.rho,label='MOONS')
-        plt.plot(jup_ref['R_CM']/1e5,jup_ref['RHO_GCC'],label='CEPAM')
+        #plt.plot(jup_ref['R_CM']/1e5,jup_ref['RHO_GCC'],label='CEPAM')
         plt.legend()
         plt.title("Density (g/cc)")
         plt.xlabel("Radius (km) (depth)")
         plt.subplot(1, 3, 2)
         plt.plot(self.p/1e6,self.t,lw=1)
-        plt.plot(jup_ref['P_CGS']/1e6,jup_ref['T_K'])
+        #plt.plot(jup_ref['P_CGS']/1e6,jup_ref['T_K'])
         plt.title("Temperature (K)")
         plt.xlabel("Pressure (bar)")
         #plt.xscale('log')
@@ -257,8 +273,8 @@ class SatelliteModel:
         #plt.title("Cumulated mass ($10^{24}$ g)")
         #plt.xlabel("Radius (km)")
         plt.scatter(self.r/self.r[-1],self.m/self.m[-1],s=2)
-        plt.scatter(jup_ref['R_RTOT'],jup_ref['# M_MTOT'],s=1,alpha=0.2)
+        #plt.scatter(jup_ref['R_RTOT'],jup_ref['# M_MTOT'],s=1,alpha=0.2)
         plt.suptitle(f"Internal structure of {self.name}")
         plt.tight_layout()
-        plt.show()
+        #plt.show()
         #fig.savefig("Figures/CMS19_comparison.pdf",bbox_inches="tight")
