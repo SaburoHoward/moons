@@ -9,14 +9,15 @@ from scipy.special import erf
 from eos.analytical_eos import polytrope, hm1989_rocks_vec
 from eos.mixture import linear_mixing, pure_eos
 
-from gravity.gravitational_harmonics import Pn, C
 from gravity.clairaut import solve_clairaut
+
+from magnetic_field.magnetic_induction import induced_field
 
 #Constants
 G = 6.673848e-8
 
 class SatelliteModel:
-    def __init__(self, name, mass, Prot, layers, nlayers, distribution_type):
+    def __init__(self, name, mass, Prot, sigma_ocean, layers, nlayers, distribution_type):
         """
         r : radii, from center to surface
         m : masses, ---
@@ -27,6 +28,7 @@ class SatelliteModel:
         self.name = name
         self.mass = mass
         self.Prot = Prot
+        self.sigma_ocean = sigma_ocean
         self.layers = layers
         self.nlayers = nlayers
         
@@ -233,6 +235,23 @@ class SatelliteModel:
         J2 = (alpha_sol[-1]-(5/4)*q_r)*2/3
         return J2
         
+    def call_mag_ind(self):
+        #First, need to identify the inner and outer radii of the ocean.
+        #I calculate the density gradient to determine at what radii the density jumps occur.
+        drho_dr = np.gradient(self.rho, self.r)
+        threshold = np.std(drho_dr) #some threshold to detect when the density gradient is larger than this.
+        indices = np.where(np.abs(drho_dr) > threshold)[0]
+        r_interfaces = self.r[indices]
+        nb_disc = len(r_interfaces)/2
+        radii_disc = []
+        for i in range(int(nb_disc)):
+            radii_disc.append((r_interfaces[2*i]+r_interfaces[2*i+1])/2)
+        r_out = radii_disc[-1]/1e2 #works ONLY IF the ocean is the second layer starting from outside!
+        r_in = radii_disc[-2]/1e2
+        #Let's send these to the induced_field subroutine
+        A, phi = induced_field(self.sigma_ocean,r_out,r_in)
+        return A, phi
+        
     def read_guess_model(self):
         """to start from/or compare to an existing model."""
         #model = ascii.read("JupiterModel/Polytrope/jup_1000.csv",format="csv",guess=False,fast_reader={'exponent_style': 'D'})
@@ -262,19 +281,23 @@ class SatelliteModel:
         plt.title("Density (g/cc)")
         plt.xlabel("Radius (km) (depth)")
         plt.subplot(1, 3, 2)
-        plt.plot(self.p/1e6,self.t,lw=1)
+        plt.plot(self.p/1e6,self.rho,lw=1)
         #plt.plot(jup_ref['P_CGS']/1e6,jup_ref['T_K'])
-        plt.title("Temperature (K)")
+        #plt.title("Temperature (K)")
+        plt.title("Density (g/cc)")
         plt.xlabel("Pressure (bar)")
+        plt.axvline(2e3,c='k',ls='--',alpha=0.5)
         #plt.xscale('log')
         plt.subplot(1, 3, 3)
         #plt.plot(self.r / 1e5, self.m / 1e24)
         #plt.plot(jup_ref['R_CM']/1e5,jup_ref['# M_MTOT']*1.89861120e+6)
-        #plt.title("Cumulated mass ($10^{24}$ g)")
-        #plt.xlabel("Radius (km)")
-        plt.scatter(self.r/self.r[-1],self.m/self.m[-1],s=2)
+        plt.title("m/M")
+        plt.xlabel("Pressure (bar)")
+        plt.scatter(self.p/1e6,self.m/self.m[-1],s=2)
+        plt.axvline(2e3,c='k',ls='--',alpha=0.5)
+        plt.axhline(0.93,c='k',ls='--',alpha=0.5)
         #plt.scatter(jup_ref['R_RTOT'],jup_ref['# M_MTOT'],s=1,alpha=0.2)
         plt.suptitle(f"Internal structure of {self.name}")
         plt.tight_layout()
-        #plt.show()
+        plt.show()
         #fig.savefig("Figures/CMS19_comparison.pdf",bbox_inches="tight")
