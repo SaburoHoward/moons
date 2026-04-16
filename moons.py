@@ -8,6 +8,7 @@ from scipy.special import erf
 
 from eos.analytical_eos import polytrope, hm1989_rocks_vec
 from eos.mixture import linear_mixing, pure_eos
+from eos.h2o_phasediag import Tprofile_and_density
 
 from gravity.clairaut import solve_clairaut
 
@@ -57,8 +58,11 @@ class SatelliteModel:
             self.p = np.ones_like(self.m) * 1e12
         else:
             # To converge faster, we start directly from a previously calculated polytrope.
-            polytrope = self.start_from_poly()
-            self.p = polytrope['P_CGS'].data[::-1]
+            #polytrope = self.start_from_poly()
+            #self.p = polytrope['P_CGS'].data[::-1]
+            # Polytrope was for Jupiter. Let's initiliaze with a Ganymede model.
+            ganym = self.start_from_ganym()
+            self.p = ganym['P_CGS'].data[::-1]
     
         self.t = np.ones_like(self.m) * 1e4
         rtot_prev = None
@@ -69,6 +73,8 @@ class SatelliteModel:
             self.mass_conservation()
             self.hydrostatic_eq(P_surf)
             #self.heat_transport(T_surf)
+            #for i, (rho, T, P) in enumerate(zip(self.rho, self.t,self.p)):
+            #    print(i, P/1e7, T, rho)
             
             try:
                 if rtot_prev is not None:
@@ -176,6 +182,8 @@ class SatelliteModel:
                 rho[indices] = hm1989_rocks_vec(P_sel, layer["roches"])
             if layer["eos"]=="constant_density":
                 rho[indices] = layer["constant_rho"]
+            if layer["eos"]=="h2o_phasediag":
+                rho[indices],self.t[indices] = Tprofile_and_density(layer["P_Ih"],P_sel,layer["rho_Ih"])
             if layer["eos"]=="mixture":
                 rho[indices],s[indices],gradad[indices] = linear_mixing(np.log10(P_sel),np.log10(T_sel),layer["nbelem"],layer["mass_fractions"],self.svpk[i])
                 if layer["T_struct"]=="isotherm":
@@ -252,6 +260,9 @@ class SatelliteModel:
         A, phi = induced_field(self.sigma_ocean,r_out,r_in)
         return A, phi
         
+    #def call_h2o_phasediag(self,p_Ih,rho_Ih):
+    #    density, temperature = Tprofile_and_density(p_Ih,self.p,rho_Ih)
+        
     def read_guess_model(self):
         """to start from/or compare to an existing model."""
         #model = ascii.read("JupiterModel/Polytrope/jup_1000.csv",format="csv",guess=False,fast_reader={'exponent_style': 'D'})
@@ -264,6 +275,10 @@ class SatelliteModel:
     def start_from_poly(self):
         poly = Table.read("model_ini/polytrope_jup_1000.csv",format='csv')
         return poly
+        
+    def start_from_ganym(self):
+        ganym = Table.read("model_ini/ganymede_2000.csv",format='csv')
+        return ganym
         
     def save_output(self):
         output = Table([(self.r / self.r[-1])[::-1],(self.m / self.m[-1])[::-1],self.r[::-1],self.m[::-1],
