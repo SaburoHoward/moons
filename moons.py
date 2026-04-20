@@ -8,7 +8,7 @@ from scipy.special import erf
 
 from eos.analytical_eos import polytrope, hm1989_rocks_vec
 from eos.mixture import linear_mixing, pure_eos
-from eos.h2o_phasediag import Tprofile_and_density
+from eos.h2o_phasediag import Tprofile_and_density,sf_create_interp
 
 from gravity.clairaut import solve_clairaut
 
@@ -46,6 +46,7 @@ class SatelliteModel:
         self.s = np.zeros(nlayers) #entropies
         self.gradad = np.zeros(nlayers)
         self.svpk = [] #to stock the interpolation functions from EOSs. Name comes from CEPAM.
+        self.svpk_h2o = {}
         
     def integrate_structure_iterate(self,max_iter,rtol,debug,P_surf,T_surf,from_scratch,save,min_iterations=10):
         """function which solves mass conservation and hydrostatic equilibrium, and iterates to converge to a solution."""
@@ -156,6 +157,11 @@ class SatelliteModel:
                         interp_rho,interp_s = pure_eos(layer["files"][j],"cubic")
                         layer_svpk.append([interp_rho,interp_s])
                     self.svpk.append(layer_svpk)
+                elif layer["eos"]=="h2o_phasediag":
+                    self.svpk_h2o['III'] = sf_create_interp('seafreeze_III.csv','III')
+                    self.svpk_h2o['V'] = sf_create_interp('seafreeze_V.csv','V')
+                    self.svpk_h2o['VI'] = sf_create_interp('seafreeze_VI.csv','VI')
+                    self.svpk_h2o['water1'] = sf_create_interp('seafreeze_water1.csv','water1')
                 else:
                     self.svpk.append(["None","None"]) #to avoid indices problemes when using different layer["eos"] in one structure.
         
@@ -183,7 +189,7 @@ class SatelliteModel:
             if layer["eos"]=="constant_density":
                 rho[indices] = layer["constant_rho"]
             if layer["eos"]=="h2o_phasediag":
-                rho[indices],self.t[indices] = Tprofile_and_density(layer["P_Ih"],P_sel,layer["rho_Ih"])
+                rho[indices],self.t[indices] = Tprofile_and_density(layer["P_Ih"],P_sel,layer["rho_Ih"],self.svpk_h2o)
             if layer["eos"]=="mixture":
                 rho[indices],s[indices],gradad[indices] = linear_mixing(np.log10(P_sel),np.log10(T_sel),layer["nbelem"],layer["mass_fractions"],self.svpk[i])
                 if layer["T_struct"]=="isotherm":
@@ -259,9 +265,6 @@ class SatelliteModel:
         #Let's send these to the induced_field subroutine
         A, phi = induced_field(self.sigma_ocean,r_out,r_in)
         return A, phi
-        
-    #def call_h2o_phasediag(self,p_Ih,rho_Ih):
-    #    density, temperature = Tprofile_and_density(p_Ih,self.p,rho_Ih)
         
     def read_guess_model(self):
         """to start from/or compare to an existing model."""

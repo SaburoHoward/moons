@@ -2,6 +2,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from seafreeze import seafreeze as sf
 from scipy.optimize import brentq
+from astropy.table import Table
+from scipy.interpolate import RectBivariateSpline as rbs
 
 def melt_T_Ih(T):
     """
@@ -78,7 +80,30 @@ def T_melt_from_P(P,phase):
         f = lambda T: melt_T_VI(T) - P
     return brentq(f, T_min, T_max)
     
-def Tprofile_and_density(p_Ih, pressure, rho_Ih):
+def sf_create_interp(file,phase):
+    """
+    Create interpolators from the SeaFreeze tables I created.
+    For water1, it provides rho, alpha and Cp.
+    For other phases, it only provides rho.
+    """
+    table = Table.read("eos/data/"+file, format='csv')
+    P_grid = np.unique(table["P_MPa"])
+    T_grid = np.unique(table["T_K"])
+    rho_flat = np.array(table["density_kg/m3"])
+    rho_grid = rho_flat.reshape(len(P_grid), len(T_grid))
+    interp_rho = rbs(P_grid,T_grid,rho_grid)
+    if phase == 'water1':
+        alpha_flat = np.array(table["alpha_K-1"])
+        alpha_grid = alpha_flat.reshape(len(P_grid), len(T_grid))
+        interp_alpha = rbs(P_grid,T_grid,alpha_grid)
+        Cp_flat = np.array(table["Cp_Jkg-1K-1"])
+        Cp_grid = Cp_flat.reshape(len(P_grid), len(T_grid))
+        interp_Cp = rbs(P_grid,T_grid,Cp_grid)
+        return interp_rho, interp_alpha, interp_Cp
+    else:
+        return interp_rho
+    
+def Tprofile_and_density(p_Ih, pressure, rho_Ih,svpk_h2o):
     """
     1. Pick a point on the Ice Ih melting line. Pressure should be between 13.0386 and 208.5667 MPa.
     2. Get the melting temperature at this pressure.
@@ -100,6 +125,11 @@ def Tprofile_and_density(p_Ih, pressure, rho_Ih):
     t_curr = t_melt
     p_curr = new_p_Ih
     
+    interp_rho_w1, interp_alpha_w1, interp_Cp_w1 = svpk_h2o['water1']
+    interp_rho_III = svpk_h2o['III']
+    interp_rho_V = svpk_h2o['V']
+    interp_rho_VI = svpk_h2o['VI']
+    
     T_sel[-1] = t_melt
     PT = np.empty((1,), dtype='object')
     for i in range(len(P_sel) - 1, 0, -1):
@@ -108,23 +138,29 @@ def Tprofile_and_density(p_Ih, pressure, rho_Ih):
             p_next = P_sel[i-1]/1e7
             if 208.566 < p_curr <= 345.421:
                 phase ='III'
+                interp_rho = interp_rho_III
             #elif 350.1 < p_curr < 631.46:
             elif 345.421 < p_curr <= 632.4: #j'élargis la V pour que ce soit continu
                 phase = 'V'
+                interp_rho = interp_rho_V
             elif 632.4 < p_curr < 2213.364:
                 phase = 'VI'
+                interp_rho = interp_rho_VI
             elif p_curr > 208.566:
-                print("probably in between, P=",p_curr)
+                #print("probably in between, P=",p_curr)
                 phase = 'V' #faut peut être changer les bornes pour que ça soit continu. C'EST FAIT.
                             #J'ai choisi V... donc rho à III/V et à V/VI est prescrit par V.
-            out_sf = sf.seafreeze(PT,phase)
-            rho = out_sf.rho
+                interp_rho = interp_rho_V
+            #out_sf = sf.seafreeze(PT,phase)
+            #rho = out_sf.rho
+            rho = interp_rho(p_curr,t_curr,dx=0, dy=0,grid=False)
             if phase == 'III' and p_next > 345.421:
                 #car si prochaine P correspond à HP V, il faut utiliser la courbe de fusion de HP V
                 #t_next = T_melt_from_P(p_next,'V')
                 t_next = t_curr #ouais mais isotherme c'est plus simple
             elif phase == 'V' and p_next > 631.46:
-                t_next = T_melt_from_P(p_next,'VI')
+                #t_next = T_melt_from_P(p_next,'VI')
+                t_next = t_curr
             elif 345.421 < p_next < 350.1 or 631.46 < p_next < 632.4:
                 t_next = t_curr #si on est entre les phases, on est isotherme pour simplifier
             else:
@@ -136,35 +172,39 @@ def Tprofile_and_density(p_Ih, pressure, rho_Ih):
             
         if not hit_HP: #on est dans l'océan
             PT[0] = (p_curr, t_curr)
-            out_sf = sf.seafreeze(PT,'water1')
-            alpha, rho, Cp = out_sf.alpha, out_sf.rho, out_sf.Cp
+            #out_sf = sf.seafreeze(PT,'water1')
+            #alpha, rho, Cp = out_sf.alpha, out_sf.rho, out_sf.Cp
+            rho = interp_rho_w1(p_curr,t_curr,dx=0, dy=0,grid=False)
+            alpha = interp_alpha_w1(p_curr,t_curr,dx=0, dy=0,grid=False)
+            Cp = interp_Cp_w1(p_curr,t_curr,dx=0, dy=0,grid=False)
+            #print((approx_rho-rho)/rho,(approx_alpha-alpha)/alpha,(approx_Cp-Cp)/Cp)
             d_sel[i] = rho
             p_next = P_sel[i-1]/1e7
-            t_next = t_curr + (P_sel[i-1]-P_sel[i])*1e-7*1e6*alpha*t_curr/rho/Cp
-            T_sel[i-1] = t_next[0]
+            t_next = t_curr + (P_sel[i-1]-P_sel[i])*1e-7*1e6*alpha*t_curr/rho/Cp #1e6 car 1MPa=1e6 J/m3
+            T_sel[i-1] = t_next #t_next[0] if we use out_sf=sf.seafreeze...
             p_curr = p_next
-            t_curr = t_next[0]
+            t_curr = t_next #same as 2 lines above
             if 208.566 < p_curr < 345.421:
                 if t_curr <= T_melt_from_P(p_curr,'III'):
-                    print("transition to HP III at (P,T)=",p_curr,T_melt_from_P(p_curr,'III'))
+                    #print("transition to HP III at (P,T)=",p_curr,T_melt_from_P(p_curr,'III'))
                     hit_HP = True
                     t_curr = T_melt_from_P(p_curr,'III')
                     T_sel[i-1] = t_curr
             elif 350.1 < p_curr < 631.46:
             #elif 345.421 < p_curr <= 632.4:
                 if t_curr <= T_melt_from_P(p_curr,'V'):
-                    print("transition to HP V at (P,T)=",p_curr,T_melt_from_P(p_curr,'V'))
+                    #print("transition to HP V at (P,T)=",p_curr,T_melt_from_P(p_curr,'V'))
                     hit_HP = True
                     t_curr = T_melt_from_P(p_curr,'V')
                     T_sel[i-1] = t_curr
             elif 632.4 < p_curr < 2213.364:
                 if t_curr <= T_melt_from_P(p_curr,'VI'):
-                    print("transition to HP VI")
+                    #print("transition to HP VI at (P,T)=",p_curr,T_melt_from_P(p_curr,'VI'))
                     hit_HP = True
                     t_curr = T_melt_from_P(p_curr,'VI')
                     T_sel[i-1] = t_curr
-            elif p_curr > 208.566:
-                print("in between, P=",p_curr) #mais pas grave car on continue dans l'océan
+            #elif p_curr > 208.566:
+            #    print("in between, P=",p_curr) #mais pas grave car on continue dans l'océan
     d_sel[0] = d_sel[1]
     density[indices_sup]=d_sel
     temperature[indices_sup]=T_sel
