@@ -250,19 +250,22 @@ class SatelliteModel:
         return J2
         
     def call_mag_ind(self):
+        # - - - works ONLY IF the ocean is the second layer starting from outside!
         #First, need to identify the inner and outer radii of the ocean.
         #I calculate the density gradient to determine at what radii the density jumps occur.
         drho_dr = np.gradient(self.rho, self.r)
         threshold = np.std(drho_dr) #some threshold to detect when the density gradient is larger than this.
         indices = np.where(np.abs(drho_dr) > threshold)[0]
         r_interfaces = self.r[indices]
-        nb_disc = len(r_interfaces)/2
-        radii_disc = []
-        for i in range(int(nb_disc)):
-            radii_disc.append((r_interfaces[2*i]+r_interfaces[2*i+1])/2)
-        r_out = radii_disc[-1]/1e2 #works ONLY IF the ocean is the second layer starting from outside!
-        r_in = radii_disc[-2]/1e2
-        #Let's send these to the induced_field subroutine
+        #nb_disc = len(r_interfaces)/2
+        #radii_disc = []
+        #for i in range(int(nb_disc)):
+        #    radii_disc.append((r_interfaces[2*i]+r_interfaces[2*i+1])/2)
+        #r_out = radii_disc[-1]/1e2
+        #r_in = radii_disc[-2]/1e2
+        # - - - we don't average the radii anymore!
+        r_out = r_interfaces[-2]/1e2
+        r_in = r_interfaces[-4]/1e2
         A, phi = induced_field(self.sigma_ocean,r_out,r_in)
         return A, phi
         
