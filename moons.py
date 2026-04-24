@@ -5,6 +5,8 @@ from astropy.io import ascii
 from scipy.integrate import solve_ivp
 from scipy.interpolate import interp1d
 from scipy.special import erf
+import pickle
+import os
 
 from eos.analytical_eos import polytrope, hm1989_rocks_vec
 from eos.mixture import linear_mixing, pure_eos
@@ -48,7 +50,7 @@ class SatelliteModel:
         self.svpk = [] #to stock the interpolation functions from EOSs. Name comes from CEPAM.
         self.svpk_h2o = {}
         
-    def integrate_structure_iterate(self,max_iter,rtol,debug,P_surf,T_surf,from_scratch,save,min_iterations=10):
+    def integrate_structure_iterate(self,max_iter,rtol,debug,P_surf,T_surf,from_scratch,save,min_iterations=3):
         """function which solves mass conservation and hydrostatic equilibrium, and iterates to converge to a solution."""
         #model = self.read_guess_model()
         #self.m = model["# M_MTOT"].data[::-1]*self.mass
@@ -158,10 +160,22 @@ class SatelliteModel:
                         layer_svpk.append([interp_rho,interp_s])
                     self.svpk.append(layer_svpk)
                 elif layer["eos"]=="h2o_phasediag":
-                    self.svpk_h2o['III'] = sf_create_interp('seafreeze_III.csv','III')
-                    self.svpk_h2o['V'] = sf_create_interp('seafreeze_V.csv','V')
-                    self.svpk_h2o['VI'] = sf_create_interp('seafreeze_VI.csv','VI')
-                    self.svpk_h2o['water1'] = sf_create_interp('seafreeze_water1.csv','water1')
+                    if os.path.exists("eos/data/interp_w1.pkl"): #I test only on the water1 file
+                        #print("SeaFreeze interpolators exist. I will use them.")
+                        with open("eos/data/interp_w1.pkl", "rb") as f:
+                            self.svpk_h2o['water1'] = pickle.load(f)
+                        with open("eos/data/interp_III.pkl", "rb") as f:
+                            self.svpk_h2o['III'] = pickle.load(f)
+                        with open("eos/data/interp_V.pkl", "rb") as f:
+                            self.svpk_h2o['V'] = pickle.load(f)
+                        with open("eos/data/interp_VI.pkl", "rb") as f:
+                            self.svpk_h2o['VI'] = pickle.load(f)
+                    else:
+                        #print("SeaFreeze interpolators do not exist. I will create them.")
+                        self.svpk_h2o['III'] = sf_create_interp('seafreeze_III.csv','III')
+                        self.svpk_h2o['V'] = sf_create_interp('seafreeze_V.csv','V')
+                        self.svpk_h2o['VI'] = sf_create_interp('seafreeze_VI.csv','VI')
+                        self.svpk_h2o['water1'] = sf_create_interp('seafreeze_water1.csv','water1')
                 else:
                     self.svpk.append(["None","None"]) #to avoid indices problemes when using different layer["eos"] in one structure.
         
@@ -257,17 +271,17 @@ class SatelliteModel:
         threshold = np.std(drho_dr) #some threshold to detect when the density gradient is larger than this.
         indices = np.where(np.abs(drho_dr) > threshold)[0]
         r_interfaces = self.r[indices]
-        #nb_disc = len(r_interfaces)/2
-        #radii_disc = []
-        #for i in range(int(nb_disc)):
-        #    radii_disc.append((r_interfaces[2*i]+r_interfaces[2*i+1])/2)
-        #r_out = radii_disc[-1]/1e2
-        #r_in = radii_disc[-2]/1e2
+        ##nb_disc = len(r_interfaces)/2
+        ##radii_disc = []
+        ##for i in range(int(nb_disc)):
+        ##    radii_disc.append((r_interfaces[2*i]+r_interfaces[2*i+1])/2)
+        ##r_out = radii_disc[-1]/1e2
+        ##r_in = radii_disc[-2]/1e2
         # - - - we don't average the radii anymore!
         r_out = r_interfaces[-2]/1e2
         r_in = r_interfaces[-4]/1e2
         A, phi = induced_field(self.sigma_ocean,r_out,r_in)
-        return A, phi
+        return A, phi, r_out/1e3, (r_out-r_in)/1e3
         
     def read_guess_model(self):
         """to start from/or compare to an existing model."""

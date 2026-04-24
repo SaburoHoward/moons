@@ -14,21 +14,20 @@ Name = "Ganymede"
 P_surf=1e6
 T_surf=110.
 Prot = 7.15 #days
-sigma_ocean = 1 #S.m^-1
-rho_iceshell = 0.9
-rho_core = 5
-rho_rock = 3
-rho_ocean = 1.1
+#sigma_ocean = 1 #S.m^-1
+rho_Ih = 920. #kg/m3
+#rho_core = 5
+#rho_rock = 3
+#rho_ocean = 1.1
 
 param_priors = OrderedDict([
     ('mnoyau', {'type': 'uniform','bounds': (0.0, 0.49)}),
     #('rho_core', {'type': 'gaussian','mu': 5.,'sigma': 0.05}),
-    #('rho_core', {'type': 'uniform','bounds': (5.15, 8.)}),
-    ('mmanteau', {'type': 'uniform','bounds': (0., 1.)}),
-    #('rho_mantle', {'type': 'uniform','bounds': (2.99, 3.01)}),
-    ('mocean', {'type': 'uniform','bounds': (0., 0.99)}),
-    #('rho_ocean', {'type': 'uniform','bounds': (1.09, 1.11)}),
-#    ('log_sigma_ocean', {'type': 'uniform','bounds': (-3, 1)}),
+    ('rho_core', {'type': 'uniform','bounds': (5.15, 8.)}),
+    ('mmanteau', {'type': 'uniform','bounds': (0.6, 0.9)}),
+    ('rho_mantle', {'type': 'uniform','bounds': (2.5, 3.5)}),
+    ('log_sigma_ocean', {'type': 'uniform','bounds': (-3, 1)}),
+    ('P_Ih', {'type': 'uniform','bounds': (14., 206.)}),
 ])
 
 # Data
@@ -37,7 +36,7 @@ data = OrderedDict([
 ('NMoI', [0.312, 0.001]),
 ('J2', [127.53e-6, 2.9e-6]),
 ('C22', [38.26e-6, 0.87e-6]),
-#('A', [0.72, 0.03]),
+('A', [0.72, 0.03]),
 ])
 
 # - - - - - - - - - - - - - - - -
@@ -46,36 +45,36 @@ data = OrderedDict([
 def forward_model(params):
     params_dict = {name: val for name, val in zip(param_priors.keys(), params)}
     Mcore = params_dict['mnoyau']
-    m2 = params_dict['mmanteau']
-    m3 = params_dict['mocean']
-    #rho_rock = params_dict['rho_mantle']
-    #rho_core = params_dict['rho_core']
-    #rho_ocean = params_dict['rho_ocean']
-    #sigma_ocean = 10**params_dict['log_sigma_ocean']
+    # épaisseurs des couches, et non les interfaces...
+    #m2 = params_dict['mmanteau']
+    #Mmantle = Mcore + (1-Mcore)*m2
+    Mmantle = params_dict['mmanteau']
+    rho_rock = params_dict['rho_mantle']
+    rho_core = params_dict['rho_core']
+    sigma_ocean = 10**params_dict['log_sigma_ocean']
+    P_Ih = params_dict['P_Ih']
     
-    Mmantle = Mcore + (1-Mcore)*m2
-    Mocean = Mmantle + (1-Mmantle)*m3
     layers = [
         {"name": "Noyau", "mass": Mobject*Mcore, "eos": "constant_density","constant_rho":rho_core,"T_struct":"isentrope"},
         {"name": "Manteau", "mass": Mobject*Mmantle, "eos": "constant_density","constant_rho":rho_rock,"T_struct":"isentrope"},
-        {"name": "Ocean", "mass": Mobject*Mocean, "eos": "constant_density","constant_rho":rho_ocean,"T_struct":"isentrope"},
-        {"name": "Ice shell", "mass": Mobject, "eos": "constant_density","constant_rho":rho_iceshell,"T_struct":"isentrope"},
+        {"name": "Ocean", "mass": Mobject, "eos": "h2o_phasediag","rho_Ih":rho_Ih,"P_Ih":P_Ih,"T_struct":"isentrope"},
     ]
     object = SatelliteModel(Name, Mobject, Prot, sigma_ocean, layers, nlayers=2000, distribution_type='erf')
-    object.integrate_structure_iterate(max_iter=100,rtol=1e-5,debug=False,P_surf=P_surf,T_surf=T_surf,from_scratch=True,save=False)
+    object.integrate_structure_iterate(max_iter=100,rtol=1e-5,debug=False,P_surf=P_surf,T_surf=T_surf,from_scratch=False,save=False)
 
     R_cm, MoI = object.moment_of_inertia()
     NMoI = MoI/(Mobject*(R_cm)**2)
     J2 = object.call_clairaut()
     C22 = J2*3/10
-    #A, phi = object.call_mag_ind()
-    model_dict = {'R_cm':R_cm, 'NMoI':NMoI, 'J2':J2 ,'C22':C22}
+    A, phi, R_Ih, D_ocean = object.call_mag_ind()
+    model_dict = {'R_cm':R_cm, 'NMoI':NMoI, 'J2':J2 ,'C22':C22,'A':A}
     return model_dict
 
 # - - - - - - - - - - - - - - - -
 # Likelihood
 # - - - - - - - - - - - - - - - -
 def log_likelihood(params, data):
+    #print(params)
     model = forward_model(params)
     logL = 0.0
     for key, (obs, sigma) in data.items():
@@ -134,8 +133,8 @@ def generate_initial_walkers(nwalkers, param_priors):
 
 ndim = len(param_priors)
 nwalkers = 16
-N_burnin = 200
-N_prod = 2000
+N_burnin = 400
+N_prod = 4000
 p0 = generate_initial_walkers(nwalkers, param_priors)
 
 sampler = emcee.EnsembleSampler(nwalkers, ndim, log_posterior,args=(param_priors, data))
