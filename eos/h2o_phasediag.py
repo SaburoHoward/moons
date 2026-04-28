@@ -118,8 +118,10 @@ def Tprofile_and_density(p_Ih, pressure, rho_Ih,svpk_h2o):
     density[indices_Ih] = rho_Ih
     indices_sup = (pressure > p_Ih * 1e7)
     P_sel = pressure[indices_sup]
+    es_gibt_ozean = True
     if P_sel.size == 0: #problème quand le manteau se rapproche trop de la surface...
         print("P_Ih (MPa) =",p_Ih, "is probably deeper than M_mantle")
+        es_gibt_ozean = False
     else:
         d_sel = density[indices_sup]
         T_sel = temperature[indices_sup]
@@ -216,7 +218,7 @@ def Tprofile_and_density(p_Ih, pressure, rho_Ih,svpk_h2o):
         temperature[indices_sup]=T_sel
         #for i, (rho, T, P) in enumerate(zip(density, temperature,pressure)):
         #    print(i, P/1e7, T, rho)
-    return density/1e3,temperature
+    return density/1e3,temperature,es_gibt_ozean
     
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -

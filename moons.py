@@ -49,6 +49,7 @@ class SatelliteModel:
         self.gradad = np.zeros(nlayers)
         self.svpk = [] #to stock the interpolation functions from EOSs. Name comes from CEPAM.
         self.svpk_h2o = {}
+        self.ozean = True
         
     def integrate_structure_iterate(self,max_iter,rtol,debug,P_surf,T_surf,from_scratch,save,min_iterations=3):
         """function which solves mass conservation and hydrostatic equilibrium, and iterates to converge to a solution."""
@@ -64,8 +65,8 @@ class SatelliteModel:
             #polytrope = self.start_from_poly()
             #self.p = polytrope['P_CGS'].data[::-1]
             # Polytrope was for Jupiter. Let's initiliaze with a Ganymede model.
-            ganym = self.start_from_ganym()
-            self.p = ganym['P_CGS'].data[::-1]
+            inimodel = self.start_from_inimodel()
+            self.p = inimodel['P_CGS'].data[::-1]
     
         self.t = np.ones_like(self.m) * 1e4
         rtot_prev = None
@@ -203,7 +204,7 @@ class SatelliteModel:
             if layer["eos"]=="constant_density":
                 rho[indices] = layer["constant_rho"]
             if layer["eos"]=="h2o_phasediag":
-                rho[indices],self.t[indices] = Tprofile_and_density(layer["P_Ih"],P_sel,layer["rho_Ih"],self.svpk_h2o)
+                rho[indices],self.t[indices],self.ozean = Tprofile_and_density(layer["P_Ih"],P_sel,layer["rho_Ih"],self.svpk_h2o)
             if layer["eos"]=="mixture":
                 rho[indices],s[indices],gradad[indices] = linear_mixing(np.log10(P_sel),np.log10(T_sel),layer["nbelem"],layer["mass_fractions"],self.svpk[i])
                 if layer["T_struct"]=="isotherm":
@@ -281,6 +282,9 @@ class SatelliteModel:
         r_out = r_interfaces[-2]/1e2
         r_in = r_interfaces[-4]/1e2
         A, phi = induced_field(self.sigma_ocean,r_out,r_in)
+        if not self.ozean:
+            #print("there is no ocean")
+            A = 0
         return A, phi, r_out/1e3, (r_out-r_in)/1e3
         
     def read_guess_model(self):
@@ -296,9 +300,14 @@ class SatelliteModel:
         poly = Table.read("model_ini/polytrope_jup_1000.csv",format='csv')
         return poly
         
-    def start_from_ganym(self):
-        ganym = Table.read("model_ini/ganymede_2000.csv",format='csv')
-        return ganym
+    def start_from_inimodel(self):
+        if self.name == "Ganymede":
+            ini_model = Table.read("model_ini/ganymede_2000.csv",format='csv')
+        elif self.name == "Europa":
+            ini_model = Table.read("model_ini/europa_2000.csv",format='csv')
+        else:
+            print("There is no initial model for the selected moon/object.")
+        return ini_model
         
     def save_output(self):
         output = Table([(self.r / self.r[-1])[::-1],(self.m / self.m[-1])[::-1],self.r[::-1],self.m[::-1],
